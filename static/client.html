@@ -1,0 +1,47 @@
+<html>
+    <head>
+        <title>Vier-Gewinnt</title>
+        <script type="text/JavaScript"
+            src="http://code.jquery.com/jquery-1.6.3.min.js"></script>
+        <script type="text/JavaScript" src="client.js"></script>
+        <link rel="stylesheet" type="text/css" href="screen.css"></script>
+    </head>
+    <body>
+        <h1>Vier-Gewinnt</h1>
+        <div id="main">
+            <div id="warnings">
+            </div>
+            <div id="join-section">
+                <h2>Join</h2>
+                <form id="join-form" action="">
+                    <label for="user">Username: </label>
+                    <input id="user" type="text" size="12" />
+                    <label for="game">Game: </label>
+                    <select id="game">
+                      <option value="-1">New Game</option>
+                    </select>
+                    <input id="send" type="submit" value="Join" />
+                </form>
+            </div>
+            <div id="game-section" style="display: none">
+              <center>
+                <table id="playground">
+                </table>
+              </center>
+            </div>
+            <div id="chat-section" style="display: none">
+              <h2>Chat</h2>
+              <div id="messages">
+              </div>
+              <br />
+              <form id="message-form" action="">
+                <input id="text" type="text" size="40" />
+                <input id="send" type="submit" value="Send" />
+              </form>
+            </div>
+        </div>
+        <div id="footer">
+          Source is not available at the moment.
+        </div>
+    </body>
+</html>
