@@ -17,11 +17,25 @@ import Control.Exception (fromException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (forM_)
 
+-- The clients are identified by names
+-- and the sinks are used to send messages
+-- to them.
 type Client = (Text, WS.Sink WS.Hybi00)
+
+-- The lobby is a place where players live
+-- until they join/create a game. This is used
+-- to send updates of the list of games to them.
+type Lobby = [WS.Sink WS.Hybi00]
+
+-- A new game is spawn as Waiting, when
+-- the second player connects the state
+-- changes to Playing.
 data GameState = Waiting Client
                | Playing Client Client
+
+-- The list of all current games.
 type ServerState = [GameState]
-type Lobby = [WS.Sink WS.Hybi00]
+
 type GameId = Int
 
 newServerState :: ServerState
