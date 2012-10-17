@@ -96,46 +96,46 @@ application lobby state rq = do
             WS.acceptRequest rq
             msg <- WS.receiveData
             liftIO $ T.putStrLn msg
-            if msg /= "HI" then
-               WS.sendTextData ("Wrong announcement" :: Text)
-            else do
-               sink <- WS.getSink
-               liftIO $ modifyMVar_ lobby $ \l ->
-                      return (sink : l)
-               serverState <- liftIO $ readMVar state
-               liftIO $ WS.sendSink sink $ WS.textData $ "GAMES: "
-                      `mappend` (T.intercalate "," $ filter (/= "") $ map showGameState serverState)
+            if msg /= "HI"
+               then WS.sendTextData ("Wrong announcement" :: Text)
+               else do
+                  sink <- WS.getSink
+                  liftIO $ modifyMVar_ lobby $ \l ->
+                         return (sink : l)
+                  serverState <- liftIO $ readMVar state
+                  liftIO $ WS.sendSink sink $ WS.textData $ "GAMES: "
+                         `mappend` (T.intercalate "," $ filter (/= "") $ map showGameState serverState)
 
-               -- Receive Name and GameId
-               msg <- WS.receiveData
-               let (name, gameId) = read $ T.unpack msg :: (Text, GameId)
-               case name of
-                _
-                    | any ($ name)
-                      [T.null, T.any isPunctuation, T.any isSpace] ->
-                          WS.sendTextData ("ERROR: Name cannot " `mappend`
-                          "contain punctuation or whitespace, and " `mappend`
-                          "cannot be empty" :: Text)
-                    | clientExists (name, sink) serverState ->
-                      WS.sendTextData ("ERROR: User already exists" :: Text)
-                    | otherwise -> do
-                        liftIO $ modifyMVar_ state $ \s -> do
-                               WS.sendSink sink $ WS.textData ("OK" :: Text)
-                               if gameId == -1 then
-                                  return $ mappend [(Waiting (name, sink))] s
-                               else do
-                                  return $ updateServerState (name, sink) gameId s
-                        lobby' <- liftIO $ readMVar lobby
-                        state' <- liftIO $ readMVar state
-                        forM_ lobby' (\x -> liftIO $ WS.sendSink x $ WS.textData $ "GAMES: " `mappend` (T.intercalate "," $ map showGameState state'))
+                  -- Receive Name and GameId
+                  msg <- WS.receiveData
+                  let (name, gameId) = read $ T.unpack msg :: (Text, GameId)
+                  case name of
+                   _
+                       | any ($ name)
+                         [T.null, T.any isPunctuation, T.any isSpace] ->
+                             WS.sendTextData ("ERROR: Name cannot " `mappend`
+                             "contain punctuation or whitespace, and " `mappend`
+                             "cannot be empty" :: Text)
+                       | clientExists (name, sink) serverState ->
+                         WS.sendTextData ("ERROR: User already exists" :: Text)
+                       | otherwise -> do
+                           liftIO $ modifyMVar_ state $ \s -> do
+                                  WS.sendSink sink $ WS.textData ("OK" :: Text)
+                                  if gameId == -1
+                                     then return $ mappend [(Waiting (name, sink))] s
+                                     else return $ updateServerState (name, sink) gameId s
+                           lobby' <- liftIO $ readMVar lobby
+                           state' <- liftIO $ readMVar state
+                           forM_ lobby' (\x -> liftIO $ WS.sendSink x $ WS.textData $ "GAMES: " `mappend` (T.intercalate "," $ map showGameState state'))
 
-                        if gameId == -1 then do
-                           liftIO $ WS.sendSink sink $ WS.textData ("FIRST" :: Text)
-                           talk state (numGames state' - 1) (name, sink)
-                        else do
-                           liftIO $ WS.sendSink sink $ WS.textData ("SECOND" :: Text)
-                           liftIO $ broadcast "STARTED" (state' !! gameId)
-                           talk state gameId (name, sink)
+                           if gameId == -1 
+                              then do
+                                   liftIO $ WS.sendSink sink $ WS.textData ("FIRST" :: Text)
+                                   talk state (numGames state' - 1) (name, sink)
+                              else do
+                                   liftIO $ WS.sendSink sink $ WS.textData ("SECOND" :: Text)
+                                   liftIO $ broadcast "STARTED" (state' !! gameId)
+                                   talk state gameId (name, sink)
 
 talk :: WS.Protocol p => MVar ServerState -> GameId -> Client -> WS.WebSockets p ()
 talk state gameId client@(user, _) = flip WS.catchWsError catchDisconnect $ do
