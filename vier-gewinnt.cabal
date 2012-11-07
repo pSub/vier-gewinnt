@@ -26,3 +26,4 @@ executable vier-gewinnt
                , wai-websockets
                , websockets
                , transformers
+               , containers

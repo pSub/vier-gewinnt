@@ -7,12 +7,15 @@ import qualified Network.Wai.Handler.WebSockets as WaiWS
 import qualified Network.Wai.Application.Static as Static
 import Data.FileEmbed (embedDir)
 
+import Data.Maybe (fromJust)
 import Data.Char (isPunctuation, isSpace)
 import Data.Monoid (mappend)
 import Data.Text (Text)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Control.Concurrent (MVar, newMVar, modifyMVar_, readMVar)
+import Control.Concurrent (MVar, newMVar, modifyMVar, modifyMVar_, readMVar)
 import Control.Exception (fromException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (forM_)
@@ -27,6 +30,9 @@ type Client = (Text, WS.Sink WS.Hybi00)
 -- to send updates of the list of games to them.
 type Lobby = [WS.Sink WS.Hybi00]
 
+-- The game identifier.
+type GameId = Text
+
 -- A new game is spawn as Waiting, when
 -- the second player connects the state
 -- changes to Playing.
@@ -34,40 +40,26 @@ data GameState = Waiting Client
                | Playing Client Client
 
 -- The list of all current games.
-type ServerState = [GameState]
-
-type GameId = Int
+type ServerState = Map GameId GameState
 
 newServerState :: ServerState
-newServerState = []
+newServerState = Map.empty
 
 newLobby :: Lobby
 newLobby = []
 
 numGames :: ServerState -> Int
-numGames = length
-
-clientExists :: Client -> ServerState -> Bool
-clientExists client = any (checkClient (fst client))
-             where checkClient :: Text -> GameState  -> Bool
-                   checkClient c (Waiting (p, _)) = c == p
-                   checkClient c (Playing (p1, _) (p2, _)) = c == p1 || c == p2
+numGames = Map.size
 
 updateServerState :: Client -> GameId -> ServerState -> ServerState
-updateServerState client id (g:ss)
-                  | id == 0 = (updateGameState client g) : ss
-                  | otherwise = g : (updateServerState client (pred id) ss)
+updateServerState client key state = Map.update (updateGameState client) key state
 
-updateGameState :: Client -> GameState -> GameState
-updateGameState c (Waiting p) = Playing p c
-updateGameState c (Playing p q)
-                | fst c == fst p = Waiting q
-                | fst c == fst q = Waiting p
-updateGameState _ gs = gs
+updateGameState :: Client -> GameState -> Maybe GameState
+updateGameState c (Waiting p) = Just $ Playing p c
+updateGameState _ (Playing _ _) = Nothing
 
-showGameState :: GameState -> Text
-showGameState (Waiting (name, _)) = name
-showGameState _ = ""
+showWaitingGames :: ServerState -> Text
+showWaitingGames = (mappend "GAMES: ") . T.intercalate "," . filter (/= "") . Map.keys
 
 broadcast :: Text -> GameState -> IO ()
 broadcast message gameState = do
@@ -103,50 +95,55 @@ application lobby state rq = do
                   liftIO $ modifyMVar_ lobby $ \l ->
                          return (sink : l)
                   serverState <- liftIO $ readMVar state
-                  liftIO $ WS.sendSink sink $ WS.textData $ "GAMES: "
-                         `mappend` (T.intercalate "," $ filter (/= "") $ map showGameState serverState)
+                  liftIO $ WS.sendSink sink $ WS.textData $ showWaitingGames serverState
 
                   -- Receive Name and GameId
                   msg <- WS.receiveData
-                  let (name, gameId) = read $ T.unpack msg :: (Text, GameId)
-                  case name of
+                  let (user, game, newgame) = read $ T.unpack msg :: (Text, GameId, GameId)
+                  case user of
                    _
-                       | any ($ name)
+                       | any ($ user)
                          [T.null, T.any isPunctuation, T.any isSpace] ->
-                             WS.sendTextData ("ERROR: Name cannot " `mappend`
+                             WS.sendTextData ("ERROR: Username cannot " `mappend`
                              "contain punctuation or whitespace, and " `mappend`
                              "cannot be empty" :: Text)
-                       | clientExists (name, sink) serverState ->
-                         WS.sendTextData ("ERROR: User already exists" :: Text)
+                       | game == "-1" && any ($ newgame)
+                         [T.null, T.any isPunctuation, T.any isSpace] ->
+                             WS.sendTextData ("ERROR: Username cannot " `mappend`
+                             "contain punctuation or whitespace, and " `mappend`
+                             "cannot be empty" :: Text)
+                       | game == "-1" && Map.member newgame serverState ->
+                         WS.sendTextData ("ERROR: Game already exists" :: Text)
                        | otherwise -> do
                            liftIO $ modifyMVar_ state $ \s -> do
                                   WS.sendSink sink $ WS.textData ("OK" :: Text)
-                                  if gameId == -1
-                                     then return $ mappend [(Waiting (name, sink))] s
-                                     else return $ updateServerState (name, sink) gameId s
-                           lobby' <- liftIO $ readMVar lobby
+                                  if game == "-1"
+                                     then do
+                                          liftIO $ WS.sendSink sink $ WS.textData ("FIRST" :: Text)
+                                          return $ Map.insert newgame (Waiting (user, sink)) s
+                                     else do
+                                          liftIO $ WS.sendSink sink $ WS.textData ("SECOND" :: Text)
+                                          liftIO $ broadcast "STARTED" $ fromJust $ Map.lookup game s
+                                          return $ updateServerState (user, sink) game s
                            state' <- liftIO $ readMVar state
-                           forM_ lobby' (\x -> liftIO $ WS.sendSink x $ WS.textData $ "GAMES: " `mappend` (T.intercalate "," $ map showGameState state'))
-
-                           if gameId == -1 
+                           lobby <- liftIO $ readMVar lobby
+                           forM_ lobby (\x -> liftIO $ WS.sendSink x $ WS.textData $ showWaitingGames state')
+                           if game == "-1"
                               then do
-                                   liftIO $ WS.sendSink sink $ WS.textData ("FIRST" :: Text)
-                                   talk state (numGames state' - 1) (name, sink)
+                                   talk state newgame (user, sink)
                               else do
-                                   liftIO $ WS.sendSink sink $ WS.textData ("SECOND" :: Text)
-                                   liftIO $ broadcast "STARTED" (state' !! gameId)
-                                   talk state gameId (name, sink)
+                                   talk state game (user, sink)
 
 talk :: WS.Protocol p => MVar ServerState -> GameId -> Client -> WS.WebSockets p ()
-talk state gameId client@(user, _) = flip WS.catchWsError catchDisconnect $ do
+talk state game client@(user, _) = flip WS.catchWsError catchDisconnect $ do
     msg <- WS.receiveData
     liftIO $ T.putStrLn msg
-    liftIO $ readMVar state >>= broadcast msg . (!! gameId)
-    talk state gameId client
+    liftIO $ readMVar state >>= broadcast msg . (fromJust . Map.lookup game)
+    talk state game client
   where
     catchDisconnect e = case fromException e of
         Just WS.ConnectionClosed -> liftIO $ modifyMVar_ state $ \s -> do
-            let s' = updateServerState client gameId s
-            broadcast (user `mappend` " disconnected") (s' !! gameId)
+            let s' = updateServerState client game s
+            broadcast (user `mappend` " disconnected") (fromJust $ Map.lookup game s')
             return s'
         _ -> return ()

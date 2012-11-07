@@ -35,7 +35,7 @@ function onMessage(event) {
         var str = event.data.replace(/^MOVE: /, '').split(',');
         if(str[1] == user) {
             set(str[0], "blue");
-        } else {
+        } else
             set(str[0], "red");
             yourturn = !yourturn;
         }
@@ -89,9 +89,10 @@ $(document).ready(function () {
         $('#warnings').html('');
         user = $('#user').val();
         game = $('#game').val();
+        name = $('#name').val();
 
         // register with the server
-        ws.send("(\"" + user + "\", " + game + ")");
+        ws.send("(\"" + user + "\", " + game + ",\"" + name + "\")");
         ws.onmessage = function(event) {
             if(event.data.match('^ERROR: ')) {
                 warning(event.data);
